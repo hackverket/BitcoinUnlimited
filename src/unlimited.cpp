@@ -40,15 +40,23 @@ using namespace std;
 
 extern CTxMemPool mempool; // from main.cpp
 static boost::atomic<uint64_t> nLargestBlockSeen(BLOCKSTREAM_CORE_MAX_BLOCK_SIZE); // track the largest block we've seen
+static boost::atomic<bool> fIsChainNearlySyncd(false);
 extern CTweakRef<uint64_t> miningBlockSize;
+extern CTweakRef<unsigned int> ebTweak;
 
 bool IsTrafficShapingEnabled();
+
+bool MiningAndExcessiveBlockValidatorRule(const unsigned int newExcessiveBlockSize, const unsigned int newMiningBlockSize)
+{
+    // The mined block size must be less then or equal too the excessive block size.
+    return ( newMiningBlockSize <= newExcessiveBlockSize );
+}
 
 std::string ExcessiveBlockValidator(const unsigned int& value,unsigned int* item,bool validate)
 {
   if (validate)
     {
-      if (value < maxGeneratedBlock) 
+      if (!MiningAndExcessiveBlockValidatorRule(value, maxGeneratedBlock))
 	{
         std::ostringstream ret;
         ret << "Sorry, your maximum mined block (" << maxGeneratedBlock << ") is larger than your proposed excessive size (" << value << ").  This would cause you to orphan your own blocks.";    
@@ -66,7 +74,7 @@ std::string MiningBlockSizeValidator(const uint64_t& value,uint64_t* item,bool v
 {
   if (validate)
     {
-      if (value > excessiveBlockSize) 
+      if (!MiningAndExcessiveBlockValidatorRule(excessiveBlockSize, value))
 	{
         std::ostringstream ret;
         ret << "Sorry, your excessive block size (" << excessiveBlockSize << ") is smaller than your proposed mined block size (" << value << ").  This would cause you to orphan your own blocks.";    
@@ -404,17 +412,44 @@ std::string UnlimitedCmdLineHelp()
     strUsage += HelpMessageOpt("-sendburst", _("The maximum rate that data can be sent in kB/s.  If there has been a period of lower than average data rates, the client may send extra data to bring the average back to '-receiveavg' but the data rate will not exceed this parameter."));
     strUsage += HelpMessageOpt("-receiveavg", _("The average rate that data can be received in kB/s"));
     strUsage += HelpMessageOpt("-sendavg", _("The maximum rate that data can be sent in kB/s"));
-    strUsage += HelpMessageOpt("-use-thinblocks=<n>", strprintf(_("Turn Thinblocks on or off (off: 0, on: 1, default: %d)"), 1));
-    strUsage += HelpMessageOpt("-connect-thinblock=<ip:port>", _("Connect to a thinblock node(s). Blocks will only be downloaded from a thinblock peer.  If no connections are possible then regular blocks will then be downloaded form any other connected peers."));
-    strUsage += HelpMessageOpt("-minlimitertxfee=<amt>", strprintf(_("Fees (in satoshi/byte) smaller than this are considered zero fee and subject to -limitfreerelay (default: %s)"), DEFAULT_MINLIMITERTXFEE));
-    strUsage += HelpMessageOpt("-maxlimitertxfee=<amt>", strprintf(_("Fees (in satoshi/byte) larger than this are always relayed (default: %s)"), DEFAULT_MAXLIMITERTXFEE));
-    strUsage += HelpMessageOpt("-bitnodes", _("Query for peer addresses via Bitnodes API, if low on addresses (default: 1 unless -connect)"));    
-    strUsage += HelpMessageOpt("-forcebitnodes", strprintf(_("Always query for peer addresses via Bitnodes API (default: %u)"), DEFAULT_FORCEBITNODES));
-    strUsage += HelpMessageOpt("-usednsseed=<host>", _("Add a custom DNS seed to use.  If at least one custom DNS seed is set, the default DNS seeds will be ignored."));
-    strUsage += HelpMessageOpt("-expeditedblock=<host>", _("Request expedited blocks from this host whenever we are connected to it"));
-    strUsage += HelpMessageOpt("-maxexpeditedblockrecipients=<n>", _("The maximum number of nodes this node will forward expedited blocks to"));
-    strUsage += HelpMessageOpt("-maxexpeditedtxrecipients=<n>", _("The maximum number of nodes this node will forward expedited transactions to"));
-    strUsage += HelpMessageOpt("-maxoutconnections=<n>", strprintf(_("Initiate at most <n> connections to peers (default: %u).  If this number is higher than --maxconnections, it will be reduced to --maxconnections."), DEFAULT_MAX_OUTBOUND_CONNECTIONS));
+    strUsage += HelpMessageOpt(
+        "-use-thinblocks=<n>", strprintf(_("Turn Thinblocks on or off (off: 0, on: 1, default: %d)"), 1));
+    strUsage += HelpMessageOpt("-connect-thinblock=<ip:port>",
+        _("Connect to a thinblock node(s). Blocks will only be downloaded from a thinblock peer.  If no connections "
+          "are possible then regular blocks will then be downloaded form any other connected peers."));
+    strUsage +=
+        HelpMessageOpt("-minlimitertxfee=<amt>", strprintf(_("Fees (in satoshi/byte) smaller than this are considered "
+                                                             "zero fee and subject to -limitfreerelay (default: %s)"),
+                                                     DEFAULT_MINLIMITERTXFEE));
+    strUsage += HelpMessageOpt(
+        "-min-xthin-nodes=<n>", strprintf(_("Minimum number of xthin nodes to automatically find and connect "
+                                            "(default: %d)"),
+                                    4));
+    strUsage += HelpMessageOpt("-maxlimitertxfee=<amt>",
+        strprintf(_("Fees (in satoshi/byte) larger than this are always relayed (default: %s)"),
+                                   DEFAULT_MAXLIMITERTXFEE));
+    strUsage += HelpMessageOpt(
+        "-bitnodes", _("Query for peer addresses via Bitnodes API, if low on addresses (default: 1 unless -connect)"));
+    strUsage += HelpMessageOpt("-forcebitnodes",
+        strprintf(_("Always query for peer addresses via Bitnodes API (default: %u)"), DEFAULT_FORCEBITNODES));
+    strUsage += HelpMessageOpt("-usednsseed=<host>", _("Add a custom DNS seed to use.  If at least one custom DNS seed "
+                                                       "is set, the default DNS seeds will be ignored."));
+    strUsage += HelpMessageOpt(
+        "-expeditedblock=<host>", _("Request expedited blocks from this host whenever we are connected to it"));
+    strUsage += HelpMessageOpt("-maxexpeditedblockrecipients=<n>",
+        _("The maximum number of nodes this node will forward expedited blocks to"));
+    strUsage += HelpMessageOpt("-maxexpeditedtxrecipients=<n>",
+        _("The maximum number of nodes this node will forward expedited transactions to"));
+    strUsage += HelpMessageOpt("-maxoutconnections=<n>",
+        strprintf(_("Initiate at most <n> connections to peers (default: %u).  If this number is higher than "
+                    "--maxconnections, it will be reduced to --maxconnections."),
+                                   DEFAULT_MAX_OUTBOUND_CONNECTIONS));
+    strUsage += HelpMessageOpt(
+        "-parallel=<n>", strprintf(_("Turn Parallel Block Validation on or off (off: 0, on: 1, default: %d)"), 1));
+    strUsage += HelpMessageOpt("-gen", strprintf(_("Generate coins (default: %u)"), DEFAULT_GENERATE));
+    strUsage += HelpMessageOpt("-genproclimit=<n>",
+        strprintf(_("Set the number of threads for coin generation if enabled (-1 = all cores, default: %d)"),
+                                   DEFAULT_GENERATE_THREADS));
     strUsage += TweakCmdLineHelp();
     return strUsage;
 }
@@ -832,13 +867,10 @@ UniValue setexcessiveblock(const UniValue& params, bool fHelp)
         ebs = boost::lexical_cast<unsigned int>(temp);
     }
 
-    if (ebs < maxGeneratedBlock) 
-      {
-      std::ostringstream ret;
-      ret << "Sorry, your maximum mined block (" << maxGeneratedBlock << ") is larger than your proposed excessive size (" << ebs << ").  This would cause you to orphan your own blocks.";    
-      throw runtime_error(ret.str());
-      }
-    excessiveBlockSize = ebs;
+    std::string estr = ebTweak.Validate(ebs);
+    if (! estr.empty())
+      throw runtime_error(estr);
+    ebTweak.Set(ebs);
 
     if (params[1].isNum())
         excessiveAcceptDepth = params[1].get_int64();
