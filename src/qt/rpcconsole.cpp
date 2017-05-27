@@ -344,8 +344,7 @@ void RPCConsole::setClientModel(ClientModel *model)
         connect(model, SIGNAL(bytesChanged(quint64,quint64)), this, SLOT(updateTrafficStats(quint64, quint64)));
 
         connect(model, SIGNAL(mempoolSizeChanged(long,size_t)), this, SLOT(setMempoolSize(long,size_t)));
-
-        // BU:
+        connect(model, SIGNAL(orphanPoolSizeChanged(long)), this, SLOT(setOrphanPoolSize(long)));
         connect(model, SIGNAL(transactionsPerSecondChanged(double)), this, SLOT(setTransactionsPerSecond(double)));
 
         // set up peer table
@@ -542,7 +541,11 @@ void RPCConsole::setMempoolSize(long numberOfTxs, size_t dynUsage)
         ui->mempoolSize->setText(QString::number(dynUsage/1000000.0, 'f', 2) + " MB");
 }
 
-// BU: begin
+void RPCConsole::setOrphanPoolSize(long numberOfTxs)
+{
+    ui->orphanPoolNumberTxs->setText(QString::number(numberOfTxs));
+}
+
 void RPCConsole::setTransactionsPerSecond(double nTxPerSec)
 {
     if (nTxPerSec < 100)
@@ -550,7 +553,6 @@ void RPCConsole::setTransactionsPerSecond(double nTxPerSec)
     else
         ui->transactionsPerSecond->setText(QString::number((uint64_t)nTxPerSec));
 }
-// BU: end
 
 void RPCConsole::on_lineEdit_returnPressed()
 {
@@ -834,7 +836,6 @@ void RPCConsole::disconnectSelectedNode()
     }
 
     // Find the node, disconnect it and clear the selected node
-    //if (CNode *bannedNode = FindNode(strNode.toStdString())) {
     if (bannedNode) {
         bannedNode->fDisconnect = true;
         //BU: Remember to release the reference we took on bannedNode to protect from use-after-free
@@ -863,7 +864,6 @@ void RPCConsole::banSelectedNode(int bantime)
     }
 
     // Find possible nodes, ban it and clear the selected node
-    //if (CNode *bannedNode = FindNode(strNode.toStdString())) {
     if (bannedNode) {
         std::string nStr = strNode.toStdString();
         std::string addr;
@@ -874,10 +874,8 @@ void RPCConsole::banSelectedNode(int bantime)
         bannedNode->fDisconnect = true;
         //BU: Remember to release the reference we took on bannedNode to protect from use-after-free
         bannedNode->Release();
-        DumpBanlist();
 
         clearSelectedNode();
-        clientModel->getBanTableModel()->refresh();
     }
 }
 
@@ -893,8 +891,6 @@ void RPCConsole::unbanSelectedNode()
     if (possibleSubnet.IsValid())
     {
         CNode::Unban(possibleSubnet);
-        DumpBanlist();
-        clientModel->getBanTableModel()->refresh();
     }
 }
 

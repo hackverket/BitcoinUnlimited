@@ -6,8 +6,15 @@
 #define REQUEST_MANAGER_H
 #include "net.h"
 #include "stat.h"
-extern unsigned int MIN_TX_REQUEST_RETRY_INTERVAL;  // When should I request a tx from someone else (in microseconds). cmdline/bitcoin.conf: -txretryinterval
-extern unsigned int MIN_BLK_REQUEST_RETRY_INTERVAL;  // When should I request a block from someone else (in microseconds). cmdline/bitcoin.conf: -blkretryinterval
+// When should I request a tx from someone else (in microseconds). cmdline/bitcoin.conf: -txretryinterval
+extern unsigned int MIN_TX_REQUEST_RETRY_INTERVAL;
+// When should I request a block from someone else (in microseconds). cmdline/bitcoin.conf: -blkretryinterval
+extern unsigned int MIN_BLK_REQUEST_RETRY_INTERVAL;
+
+// How long in seconds we wait for a xthin request to be fullfilled before disconnecting the node.
+static const unsigned int THINBLOCK_DOWNLOAD_TIMEOUT = 30;
+
+class CNode;
 
 class CNodeRequestData
 {
@@ -29,10 +36,10 @@ public:
   bool operator<(const CNodeRequestData &rhs) const { return desirability < rhs.desirability; }
 };
 
-struct IsCNodeRequestDataThisNode // Compare a CNodeRequestData object to a node
+struct MatchCNodeRequestData // Compare a CNodeRequestData object to a node
 {
   CNode* node;
-  IsCNodeRequestDataThisNode(CNode* n):node(n) {};
+  MatchCNodeRequestData(CNode* n):node(n) {};
   inline bool operator()(const CNodeRequestData& nd) const { return nd.node == node; }
 };
 
@@ -48,21 +55,26 @@ public:
   //char    requestCount[MAX_AVAIL_FROM];
   //CNode* availableFrom[MAX_AVAIL_FROM];
   ObjectSourceList availableFrom;
-  int priority;
+  unsigned int priority;
   
   CUnknownObj()
   {
     rateLimited = false;
     outstandingReqs = 0;
     lastRequestTime = 0;
+    priority = 0;
   }
 
-  void AddSource(CNode* from);
+  bool AddSource(CNode* from); // returns true if the source did not already exist
 };
 
 class CRequestManager
 {
   protected:
+#ifdef DEBUG
+  friend UniValue getstructuresizes(const UniValue& params, bool fHelp);
+#endif
+
   // map of transactions
   typedef std::map<uint256, CUnknownObj> OdMap;
   OdMap mapTxnInfo;
@@ -79,7 +91,7 @@ class CRequestManager
   CStatHistory<int> rejectedTxns;
   CStatHistory<int> droppedTxns;
   CStatHistory<int> pendingTxns;
-  
+
   void cleanup(OdMap::iterator& item);
   CLeakyBucket requestPacer;
   CLeakyBucket blockPacer;
@@ -87,10 +99,10 @@ class CRequestManager
   CRequestManager();
 
   // Get this object from somewhere, asynchronously.
-  void AskFor(const CInv& obj, CNode* from, int priority=0);
+  void AskFor(const CInv &obj, CNode *from, unsigned int priority = 0);
 
   // Get these objects from somewhere, asynchronously.
-  void AskFor(const std::vector<CInv>& objArray, CNode* from,int priority=0);
+  void AskFor(const std::vector<CInv> &objArray, CNode *from, unsigned int priority = 0);
 
   // Indicate that we got this object, from and bytes are optional (for node performance tracking)
   void Received(const CInv& obj, CNode* from=NULL, int bytes=0);
